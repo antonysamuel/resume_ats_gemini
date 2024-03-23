@@ -1,9 +1,11 @@
 import os
 import time
+import ast
 from dotenv import load_dotenv
 import google.generativeai as genai
 from langchain_community.document_loaders import PyPDFLoader
 from google.ai import generativelanguage as glm
+import json
 
 load_dotenv('.env')
 
@@ -96,15 +98,19 @@ def parse_resume(file_path, job_title, job_description,skills):
 
         skills: ""{skills}""
 
-        Parse the given resume and give out a score out of 100 for match found in the resume for the given job role.
+        Parse the given resume and give out a score out of 100 for match found in the resume for the given job role in json format
+        'summary': 'sumary of scoring',
+        'score'  : 'score given on 100'
+        
+        
 
     """   
     retry = 0
-    while retry < 3:
+    while retry < 5:
         try:
             result = model2.generate_content(prompt_1)
             parser['summary'] = result.text
-            retry = 3
+            retry = 5
         except:
             print("Retrying....!")
             retry += 1
@@ -177,5 +183,14 @@ Creative problem-solving skills and a passion for innovation in the space techno
   "curiosity",
   "creativity",
   "collaboration"'''
-    resume = parse_resume('resumes/Jonathan Whitmore – PhD, Data Scientist.pdf', job_title, job_description, skills)
-    print(resume)
+    resumes = os.listdir('resumes/')
+    for resume in resumes:
+        print(f"------------{resume}----------------------")
+        result = parse_resume(os.path.join('resumes',resume), job_title, job_description, skills)
+        summary = result['summary']
+        summary = summary.replace('```','').strip().replace('json','').strip()
+        summary = json.loads(summary)
+        score = summary["score"]
+        print(f"{resume} : {score}")
+        # break
+        # print("----------------------------------------------")
