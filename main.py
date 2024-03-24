@@ -4,6 +4,9 @@ import ast
 from dotenv import load_dotenv
 import google.generativeai as genai
 from langchain_community.document_loaders import PyPDFLoader
+from langchain_core.documents import Document
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.vectorstores import FAISS
 from google.ai import generativelanguage as glm
 import json
 
@@ -39,7 +42,7 @@ resume_template = glm.Tool(
 #define model
 model = genai.GenerativeModel(model_name= 'gemini-1.0-pro', tools= resume_template)
 model2 = genai.GenerativeModel(model_name= 'gemini-1.0-pro')
-
+embedding_model = GoogleGenerativeAIEmbeddings(model = 'models/embedding-001')
 
 
 
@@ -56,7 +59,7 @@ def load_pdf(file_path):
     return page_contents
 
 
-def parse_resume(file_path, job_title, job_description,skills):
+def parse_resume(file_path):
     pdf_content = load_pdf(file_path)
 
     prompt_0 = f"""
@@ -84,39 +87,29 @@ def parse_resume(file_path, job_title, job_description,skills):
     parser = {}
     for k,v in details.items():
         parser[k] = v
-
-
-    
-    prompt_1 = f"""
-        Act as an efficient ATS System
-
-        resume: ""{parser}""
-
-        job_role: ""{job_title}""
-
-        job_description: ""{job_description}""
-
-        skills: ""{skills}""
-
-        Parse the given resume and give out a score out of 100 for match found in the resume for the given job role in json format
-        'summary': 'sumary of scoring',
-        'score'  : 'score given on 100'
-        
-        
-
-    """   
-    retry = 0
-    while retry < 5:
-        try:
-            result = model2.generate_content(prompt_1)
-            parser['summary'] = result.text
-            retry = 5
-        except:
-            print("Retrying....!")
-            retry += 1
-            time.sleep(3)
-   
     return parser
+
+
+def shortlist_resume(resume_folder, job):
+    user_query = f'''Shortlist candidate who will be apt for the post of {job['job_title']}. More details regarding the job is given below:
+    {job['job_description']}. The candidates having releavent experience will be prefered and also with releavent skills for the job which is {job['skills']} is to be 
+    given importance.
+    The candidate having releavent work experience for the job role {job['job_title']} will be an add-on.
+    '''   
+
+    resume_doc_list = []
+    for resume in os.listdir(resume_folder):
+        print(f'--------------{resume}------------')
+        candidate_data_dict = parse_resume(os.path.join(resume_folder, resume))
+        candidate_data_str = f'''The candidate have the following work experience : {candidate_data_dict['work_experience'] if 'work_experience' in candidate_data_dict else 'None'}. Skills of the candidate are :  {candidate_data_dict['skills'] if 'skills' in candidate_data_dict else 'None'}.
+        The education of candidate are : {candidate_data_dict['education'] if 'education' in candidate_data_dict else 'None'}.  
+        '''
+        resume_doc_list.append(Document(page_content = candidate_data_str, metadata = dict(name = candidate_data_dict['name'], file_name = resume)))
+
+    db = FAISS.from_documents(documents = resume_doc_list, embedding = embedding_model)
+    result = db.similarity_search_with_score(user_query, k = 4)
+    return result
+
 
 if __name__ == '__main__':
     job_title = 'Data Science / AI / ML Consultant'
@@ -183,14 +176,8 @@ Creative problem-solving skills and a passion for innovation in the space techno
   "curiosity",
   "creativity",
   "collaboration"'''
-    resumes = os.listdir('resumes/')
-    for resume in resumes:
-        print(f"------------{resume}----------------------")
-        result = parse_resume(os.path.join('resumes',resume), job_title, job_description, skills)
-        summary = result['summary']
-        summary = summary.replace('```','').strip().replace('json','').strip()
-        summary = json.loads(summary)
-        score = summary["score"]
-        print(f"{resume} : {score}")
-        # break
-        # print("----------------------------------------------")
+    
+    job_dict = dict(job_title = job_title, job_description = job_description, skills = skills)
+    result = shortlist_resume('test_resume', job_dict)
+    result = [(r[0].metadata, r[1]) for r in result]
+    print(result)
