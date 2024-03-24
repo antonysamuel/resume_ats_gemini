@@ -90,6 +90,23 @@ def parse_resume(file_path):
     return parser
 
 
+def generate_resume_summary(candidate_details):
+    prompt_1 = f'''Summarize the given resume:
+    {candidate_details}
+    '''
+
+    retry = 0
+    while retry < 3:
+        try:
+            response = model2.generate_content(prompt_1)
+            retry = 3
+        except:
+            print("<Summary> Retrying....!")
+            retry += 1
+            time.sleep(3)
+    
+    return response.text
+
 def shortlist_resume(resume_folder, job):
     user_query = f'''Shortlist candidate who will be apt for the post of {job['job_title']}. More details regarding the job is given below:
     {job['job_description']}. The candidates having releavent experience will be prefered and also with releavent skills for the job which is {job['skills']} is to be 
@@ -108,7 +125,10 @@ def shortlist_resume(resume_folder, job):
 
     db = FAISS.from_documents(documents = resume_doc_list, embedding = embedding_model)
     result = db.similarity_search_with_score(user_query, k = 4)
-    return result
+    result_out = [dict(name = r[0].metadata['name'], file_name = r[0].metadata['file_name'], summary = generate_resume_summary(r[0].page_content), score = r[1]) for r in result]
+    return result_out
+
+
 
 
 if __name__ == '__main__':
@@ -179,5 +199,4 @@ Creative problem-solving skills and a passion for innovation in the space techno
     
     job_dict = dict(job_title = job_title, job_description = job_description, skills = skills)
     result = shortlist_resume('test_resume', job_dict)
-    result = [(r[0].metadata, r[1]) for r in result]
     print(result)
