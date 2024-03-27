@@ -7,13 +7,15 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
+from langchain.evaluation import load_evaluator
+
 from google.ai import generativelanguage as glm
 import json
 
 load_dotenv('.env')
 
 
-genai.configure(api_key= os.environ.get("GOOGLE_API_KEY"))
+genai.configure(api_key= os.environ.get("GOOGLE_API_KEY_1"))
 
 
 #define  function template
@@ -43,8 +45,16 @@ resume_template = glm.Tool(
 model = genai.GenerativeModel(model_name= 'gemini-1.0-pro', tools= resume_template)
 model2 = genai.GenerativeModel(model_name= 'gemini-1.0-pro')
 embedding_model = GoogleGenerativeAIEmbeddings(model = 'models/embedding-001')
+evaluator = load_evaluator("embedding_distance", embeddings=embedding_model)
 
 
+
+# Get the embeddings of each text and add to an embeddings column in the dataframe
+def embed_fn(title, text):
+  return genai.embed_content(model=model,
+                             content=text,
+                             task_type="retrieval_document",
+                             title=title)["embedding"]
 
 
 #Loading pdf 
@@ -72,7 +82,7 @@ def parse_resume(file_path):
     """
 
 
-    chat = model.start_chat()
+    chat = model.start_chat(enable_automatic_function_calling=True)
     retry = 0
     while retry < 3:
         try:
@@ -80,6 +90,10 @@ def parse_resume(file_path):
             retry = 3
         except:
             print("Retrying....!")
+            genai.configure(api_key= os.environ.get(f"GOOGLE_API_KEY_{retry%2}"))
+            model_ = genai.GenerativeModel(model_name= 'gemini-1.0-pro', tools= resume_template)
+            chat = model_.start_chat(enable_automatic_function_calling=True)
+
             retry += 1
             time.sleep(3)
 
@@ -91,8 +105,9 @@ def parse_resume(file_path):
 
 
 def generate_resume_summary(candidate_details):
-    prompt_1 = f'''Summarize the given resume:
+    prompt_1 = f'''Summarize the given resume in one paragraph dont use any headings like **summary** etc. Just output one paragraph
     {candidate_details}
+    
     '''
 
     retry = 0
@@ -108,24 +123,36 @@ def generate_resume_summary(candidate_details):
     return response.text
 
 def shortlist_resume(resume_folder, job):
-    user_query = f'''Shortlist candidate who will be apt for the post of {job['job_title']}. More details regarding the job is given below:
-    {job['job_description']}. The candidates having releavent experience will be prefered and also with releavent skills for the job which is {job['skills']} is to be 
+    user_query = f'''Shortlist candidate who will be apt for the post of {job['title']}. More details regarding the job is given below:
+    {job['description']}. The candidates having releavent experience will be prefered and also with releavent skills for the job which is {job['skills']} is to be 
     given importance.
-    The candidate having releavent work experience for the job role {job['job_title']} will be an add-on.
+    The candidate having releavent work experience for the job role {job['title']} will be an add-on.
     '''   
 
     resume_doc_list = []
+    candidate_details = {}
     for resume in os.listdir(resume_folder):
         print(f'--------------{resume}------------')
         candidate_data_dict = parse_resume(os.path.join(resume_folder, resume))
         candidate_data_str = f'''The candidate have the following work experience : {candidate_data_dict['work_experience'] if 'work_experience' in candidate_data_dict else 'None'}. Skills of the candidate are :  {candidate_data_dict['skills'] if 'skills' in candidate_data_dict else 'None'}.
         The education of candidate are : {candidate_data_dict['education'] if 'education' in candidate_data_dict else 'None'}.  
         '''
+        
+        candidate_details[resume] = candidate_data_dict
         resume_doc_list.append(Document(page_content = candidate_data_str, metadata = dict(name = candidate_data_dict['name'], file_name = resume)))
 
     db = FAISS.from_documents(documents = resume_doc_list, embedding = embedding_model)
     result = db.similarity_search_with_score(user_query, k = 4)
-    result_out = [dict(name = r[0].metadata['name'], file_name = r[0].metadata['file_name'], summary = generate_resume_summary(r[0].page_content), score = r[1]) for r in result]
+    result_out = [dict(name = r[0].metadata['name'], file_name = r[0].metadata['file_name'], summary = generate_resume_summary(r[0].page_content), score = str(1 - r[1])) for r in result]
+    for idx, r_out in enumerate(result_out):
+        try:
+            skills_ = candidate_details[r_out['file_name']]['skills']
+            skill_score = evaluator.evaluate_strings(prediction = skills_, reference = job['skills'])
+            result_out[idx]['skill_score'] = str(1 - skill_score['score'])
+        except:
+            print("Skills not found for ",r_out['file_name'])
+
+
     return result_out
 
 
@@ -197,6 +224,6 @@ Creative problem-solving skills and a passion for innovation in the space techno
   "creativity",
   "collaboration"'''
     
-    job_dict = dict(job_title = job_title, job_description = job_description, skills = skills)
+    job_dict = dict(title = job_title, description = job_description, skills = skills)
     result = shortlist_resume('test_resume', job_dict)
     print(result)
