@@ -44,6 +44,8 @@ resume_template = glm.Tool(
 #define model
 model = genai.GenerativeModel(model_name= 'gemini-1.0-pro', tools= resume_template)
 model2 = genai.GenerativeModel(model_name= 'gemini-1.0-pro')
+job_generation_model = genai.GenerativeModel(model_name= 'gemini-1.0-pro')
+
 embedding_model = GoogleGenerativeAIEmbeddings(model = 'models/embedding-001')
 evaluator = load_evaluator("embedding_distance", embeddings=embedding_model)
 
@@ -155,6 +157,29 @@ def shortlist_resume(resume_folder, job):
 
     return result_out
 
+def generate_jobcontent(job_title):
+    chat = job_generation_model.start_chat()
+
+    response = chat.send_message(
+        f''' 
+        Generate job descrition  for the role of {job_title}. Give output without any text decorations in two paragraph. return response without any text decorations like ** ** for headings etc in two paragraph . also dont give job title or anyting as heading
+        '''
+
+    )
+    # details = response.candidates[0].content.parts[0].function_call.args
+    return response.text.replace('*', ' ') if '*' in response.text else response.text
+
+def generate_jobskills(job_title):
+    chat2 = job_generation_model.start_chat()
+
+    response = chat2.send_message(
+        f''' 
+        Generate list of skills prefered for job role {job_title}. Give response in the format Skills: data science, machine learning, python, java , etc
+        '''
+
+    )
+    # details = response.candidates[0].content.parts[0].function_call.args
+    return response.text
 
 
 
@@ -225,5 +250,6 @@ Creative problem-solving skills and a passion for innovation in the space techno
   "collaboration"'''
     
     job_dict = dict(title = job_title, description = job_description, skills = skills)
-    result = shortlist_resume('test_resume', job_dict)
+    # result = shortlist_resume('test_resume', job_dict)
+    result = generate_jobcontent(job_title) + ' ' + generate_jobskills(job_title)
     print(result)
